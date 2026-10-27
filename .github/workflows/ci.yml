@@ -14,67 +14,108 @@ jobs:
     name: SAST and SCA
     runs-on: ubuntu-24.04
 
+    env:
+      SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install bandit
+          python -m pip install bandit safety
+
+      - name: Install Snyk
+        run: npm install --global snyk
+
+      - name: Check scanner credentials
+        run: |
+          test -n "$SAFETY_API_KEY" || {
+            echo "::error::SAFETY_API_KEY is missing"
+            exit 1
+          }
+          test -n "$SNYK_TOKEN" || {
+            echo "::error::SNYK_TOKEN is missing"
+            exit 1
+          }
 
       - name: Prepare reports
-        run: mkdir -p reports
+        run: |
+          mkdir -p reports/dependency-check
 
       - name: Bandit SAST
         id: bandit
         continue-on-error: true
         run: |
-          python -m bandit -r app/ run.py -ll \
+          python -m bandit -r app/ run.py \
             -f html -o reports/bandit.html
-          result=$?
-          echo "Bandit exit code: $result"
-          exit $result
+
+      - name: Safety SCA
+        id: safety
+        continue-on-error: true
+        run: |
+          safety --stage production scan \
+            --target . \
+            --save-as html reports/safety.html
+
+      - name: Snyk SCA
+        id: snyk
+        continue-on-error: true
+        run: |
+          snyk test \
+            --file=requirements.txt \
+            --package-manager=pip \
+            --html-file-output=reports/snyk.html
 
       - name: OWASP Dependency-Check SCA
         id: dependency_check
         continue-on-error: true
         uses: dependency-check/Dependency-Check_Action@main
         with:
-          project: IS Lab1
-          path: requirements.txt
+          project: IS
+          path: .
           format: HTML
-          out: reports
+          out: reports/dependency-check
           args: >
-            --enableExperimental
             --failOnCVSS 7
             --disableOssIndex
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-reports
-          path: reports/
+          path: reports/**/*.html
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Check security results
         if: always()
         env:
           BANDIT_RESULT: ${{ steps.bandit.outcome }}
-          SCA_RESULT: ${{ steps.dependency_check.outcome }}
+          SAFETY_RESULT: ${{ steps.safety.outcome }}
+          SNYK_RESULT: ${{ steps.snyk.outcome }}
+          OWASP_RESULT: ${{ steps.dependency_check.outcome }}
         run: |
           echo "Bandit: $BANDIT_RESULT"
-          echo "OWASP Dependency-Check: $SCA_RESULT"
+          echo "Safety: $SAFETY_RESULT"
+          echo "Snyk: $SNYK_RESULT"
+          echo "OWASP: $OWASP_RESULT"
 
           if [ "$BANDIT_RESULT" != "success" ] || \
-             [ "$SCA_RESULT" != "success" ]; then
+             [ "$SAFETY_RESULT" != "success" ] || \
+             [ "$SNYK_RESULT" != "success" ] || \
+             [ "$OWASP_RESULT" != "success" ]; then
             echo "Security checks failed"
             exit 1
           fi
