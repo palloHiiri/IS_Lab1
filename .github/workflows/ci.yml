@@ -37,9 +37,9 @@ jobs:
         continue-on-error: true
         run: |
           python -m bandit -r app/ run.py -ll \
-            -f txt -o reports/bandit.txt
+            -f html -o reports/bandit.html
           result=$?
-          cat reports/bandit.txt
+          echo "Bandit exit code: $result"
           exit $result
 
       - name: OWASP Dependency-Check SCA
