@@ -1,5 +1,7 @@
 import html
 
+TOKEN_TYPE = "Bearer"
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -38,7 +40,7 @@ def login():
 
     return jsonify({
         "access_token": token,
-        "token_type": "Bearer"
+        "token_type": TOKEN_TYPE
     }), 200
 
 
